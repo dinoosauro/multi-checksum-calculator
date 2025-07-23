@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:ital,wght@0,100..900;1,100..900&display=swap"
+    rel="stylesheet">
+  <link rel="icon" href="./icon.svg">
+  <link rel="manifest" href="./manifest.json">
+    <meta name="description"
+    content="Calculate the checksum/hash of your local files using multiple algorithms (SHA1, SHA256, SHA512, MD5 etc.)">
+  <title>Multi Checksum Calculator</title>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+  <script>
+    const version = "1.0.0";
+    (async () => {
+      const result = await navigator.serviceWorker.register('./service-worker.js', { scope: location.href.substring(0, location.href.lastIndexOf("/") + 1) });
+      if (navigator.onLine) await result.update();
+    })();
+    fetch("./updatecode", { cache: "no-store" }).then((res) => res.text().then((text) => { if (text.replace("\n", "") !== version) if (confirm(`There's a new version of Multi Checksum Calculator. Do you want to update? [${version} --> ${text.replace("\n", "")}]`)) { caches.delete("multichecksumcalc-cache"); location.reload(true); } }).catch((e) => { console.error(e) })).catch((e) => console.error(e)); // Check if the application code is the same as the current application version and, if not, ask the user to update
+  </script>
+</body>
+
+</html>

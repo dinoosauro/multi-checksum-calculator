@@ -1,0 +1,16 @@
+{
+  "name": "Multi Checksum Calculator",
+  "short_name": "Multi Checksum Calculator",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#151515",
+  "theme_color": "#506341",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}
