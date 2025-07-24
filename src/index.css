@@ -168,3 +168,20 @@ a {
   width: 70vw;
   height: 70vh;
 }
+
+.topDialog {
+  width: calc(70vw - 10px);
+  left: 15vw;
+  padding: 10px;
+  border-radius: 16px;
+  backdrop-filter: blur(8px) brightness(40%);
+  -webkit-backdrop-filter: blur(8px) brightness(40%);
+  position: fixed;
+  top: 5vh;
+  z-index: 3;
+  transition: opacity 0.2s ease-in-out;
+  opacity: 0;
+}
+.wcenter {
+  justify-content: center;
+}
