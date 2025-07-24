@@ -302,7 +302,7 @@ export default function App() {
             let str = `"File name:",`;
             for (const item of tableColumns) str += `"${item}",`;
             str = str.substring(0, str.length - 1);
-            for (const file of results) str += `\n"${file.fileName.replace(/\"/g, "\"\"")}",\"${file.hashes.map(item => `"${item}"`).join("\",\"")}\"`;
+            for (const file of results) str += `\n"${file.fileName.replace(/\"/g, "\"\"")}",\"${file.hashes.join("\",\"")}\"`;
             const trimmedFileName = csvFileName.current.trim();
             const a = Object.assign(document.createElement("a"), {
               href: URL.createObjectURL(new Blob([str])),
