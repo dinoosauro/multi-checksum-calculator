@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import CryptoJS from "crypto-js";
 import OpenSourceDialog from "./OpenSourceDialog";
 import type { AlgoStorage, AlgoType } from "./Interfaces";
+import HandleDroppedFiles from "./HandleDroppedFiles";
+
+declare global {
+  interface File {
+    _path: string
+  }
+}
 
 export default function App() {
   /**
@@ -26,7 +33,7 @@ export default function App() {
    * The array of files that need to be converted.
    * This is saved in an independent array so that we can keep track of the number of concurrent operations.
    */
-  let fileArr: File[] = [];
+  let fileArr = useRef<File[]>([]);
   /**
    * The content that should be displayed in the "Results tabs"
    */
@@ -106,11 +113,12 @@ export default function App() {
    */
   async function getShaSum(isAlreadyRunning?: boolean) {
     if (!isAlreadyRunning && conversionSettings.current.currentOperations >= conversionSettings.current.maxOperations) return; // There are too many operations that are running,
-    const file = fileArr.splice(0, 1)[0];
+    const file = fileArr.current.splice(0, 1)[0];
     if (!file) { // There's nothing more to convert. This function will stop calling itself.
       conversionSettings.current.currentOperations--;
       return;
     }
+    if (!isAlreadyRunning) conversionSettings.current.currentOperations++;
     /**
      * The list of the algorithms to use for this operation
      */
@@ -130,13 +138,12 @@ export default function App() {
      */
     const currentTable = Array.from(tempSet);
     updateTableColumns(currentTable); // Maybe this was the first time the user has selected a certain algorithm, so we'll update the table header
-    const id = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
     const worker = new Worker(new URL("./Worker", import.meta.url), { type: "module" });
     /**
-* The information about the current progress
-*/
+    * The information about the current progress
+    */
     let currentProgress: OutputProgress = {
-      fileName: file.webkitRelativePath || file.name,
+      fileName: file._path || file.webkitRelativePath || file.name,
       max: file.size,
       id: CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex)
     }
@@ -153,7 +160,7 @@ export default function App() {
             outputStrings[currentTable.indexOf(item.item)] = item.hash;
           }
           updateResults(prev => [...prev, {
-            fileName: file.webkitRelativePath || file.name,
+            fileName: file._path || file.webkitRelativePath || file.name,
             hashes: outputStrings,
             id: CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex),
           }]);
@@ -217,7 +224,25 @@ export default function App() {
         }, 5000)
       }
     }, 15)
-  }, [csvDownloadLink])
+  }, [csvDownloadLink]);
+  /**
+   * Start the calculation of the checksum of the files.
+   */
+  function handleNewFiles(files: File[] | FileList) {
+    updateShowTables(true); // Show the Progress and Result tables
+    fileArr.current.push(...files);
+    console.log(`Added ${files.length} files`)
+    for (let i = 0; i < Math.min(conversionSettings.current.maxOperations, files.length); i++) getShaSum();
+  }
+  useEffect(() => {
+    window.ondrop = async (e) => { // Process the dropped files
+      e.preventDefault();
+      if (e.dataTransfer?.items) {
+        handleNewFiles(await HandleDroppedFiles(Array.from(e.dataTransfer.items).map(item => item.webkitGetAsEntry()).filter(item => !!item)));
+      }
+    };
+    window.ondragover = (e) => e.preventDefault();
+  }, [])
   return <>
     <header>
       <div className="flex hcenter gap">
@@ -235,7 +260,7 @@ export default function App() {
             <input
               type="checkbox"
               defaultChecked={suggestedAlgo.current[algo as AlgoType]}
-              onChange={(e) => { suggestedAlgo.current[algo as AlgoType] = e.target.checked }}
+              onChange={(e) => { suggestedAlgo.current[algo as AlgoType] = e.target.checked; saveSettings(); }}
             />{algo}
           </label>)}
         </div>
@@ -265,10 +290,7 @@ export default function App() {
           directory: conversionSettings.current.pickFolder,
           onchange: () => {
             if (!input.files) return;
-            updateShowTables(true); // Show the Progress and Result tables
-            fileArr.push(...input.files);
-            console.log(`Added ${input.files.length} files`)
-            for (let i = 0; i < Math.min(conversionSettings.current.maxOperations, input.files.length); i++) getShaSum();
+            handleNewFiles(input.files);
           },
         });
         input.click();
