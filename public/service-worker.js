@@ -7,7 +7,9 @@ const filestoCache = [
     './icon.svg',
     './assets/index.css',
     './assets/index.js',
-    './assets/Worker-BAaLMeMy.js'
+    './assets/work-sans-latin-400-normal.woff2',
+    './assets/work-sans-latin-700-normal.woff2',
+    './assets/Worker-Do2N9Jii.js'
 ];
 self.addEventListener('install', e => {
     e.waitUntil(

@@ -3,11 +3,38 @@ import CryptoJS from "crypto-js";
 import OpenSourceDialog from "./OpenSourceDialog";
 import type { AlgoStorage, AlgoType } from "./Interfaces";
 import HandleDroppedFiles from "./HandleDroppedFiles";
+import type { Entry, ZipReader } from "@zip.js/zip.js";
+// @ts-ignore | Import normal font
+import "@fontsource/work-sans/400";
+// @ts-ignore | Import bold font
+import "@fontsource/work-sans/700";
 
 declare global {
   interface File {
     _path: string
   }
+}
+
+/**
+ * The interface used by the script to read files from Zip.JS
+ */
+interface ZipStreamStore {
+  /**
+   * The ZipReader used for this zip file
+   */
+  zipFile: ZipReader<Blob>,
+  /**
+   * The single zip entry to read
+   */
+  data: Entry,
+  /**
+   * The filename of the entry
+   */
+  _path: string,
+  /**
+   * The size of the entry
+   */
+  size: number
 }
 
 export default function App() {
@@ -20,7 +47,8 @@ export default function App() {
     chunkSize: 1024 * 512,
     pickFolder: false,
     hasSettingsBeenRestored: false,
-    trackProgress: true
+    trackProgress: true,
+    readZip: 0
   });
   /**
    * Save the user settings in the LocalStorage
@@ -33,7 +61,7 @@ export default function App() {
    * The array of files that need to be converted.
    * This is saved in an independent array so that we can keep track of the number of concurrent operations.
    */
-  let fileArr = useRef<File[]>([]);
+  let fileArr = useRef<(File | ZipStreamStore)[]>([]);
   /**
    * The content that should be displayed in the "Results tabs"
    */
@@ -143,6 +171,7 @@ export default function App() {
     * The information about the current progress
     */
     let currentProgress: OutputProgress = {
+      // @ts-ignore
       fileName: file._path || file.webkitRelativePath || file.name,
       max: file.size,
       id: CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex)
@@ -151,6 +180,10 @@ export default function App() {
     const promises = new Map<string, () => void>([]);
     worker.onmessage = (msg) => {
       switch (msg.data.action) {
+        case "UpdateProgress": {
+          if (currentProgress.progress) currentProgress.progress.value += msg.data.content;
+          break;
+        }
         case "HashesReady": {
           /**
           * The checksums in the position they needed to be added in the "Result" table
@@ -160,6 +193,7 @@ export default function App() {
             outputStrings[currentTable.indexOf(item.item)] = item.hash;
           }
           updateResults(prev => [...prev, {
+            // @ts-ignore
             fileName: file._path || file.webkitRelativePath || file.name,
             hashes: outputStrings,
             id: CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex),
@@ -186,16 +220,30 @@ export default function App() {
       promises.set(id, res);
       worker.postMessage({ action: "Start", content: outputOptions, id });
     });
+    if (file instanceof File) {
     for (let offset = 0; offset < file.size; offset += conversionSettings.current.chunkSize) { // Let's get this chunk of the Blob, and continue handling the hash.                 
       const chunk = file.slice(offset, offset + conversionSettings.current.chunkSize);
       const arrayBuffer = await chunk.arrayBuffer();
-      if (currentProgress.progress) currentProgress.progress.value += conversionSettings.current.chunkSize; // Maybe React still hasn't updated the DOM, so this might be undefined.                 
       await new Promise<void>(res => { // Wait that the worker adds this ArrayBuffer
         const id = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
         promises.set(id, res);
         worker.postMessage({ action: "AddBuffer", id, content: arrayBuffer }, [arrayBuffer]);
       })
     }
+  } else await new Promise<void>(res => { // Read a zip file. We'll create a new WritableStream, that'll send all the chunks to the ArrayBuffer
+    if (file.data.getData) file.data.getData(new WritableStream({ 
+      write: async (chunk) => {
+        await new Promise<void>(res => {
+          const id = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+          promises.set(id, res);
+          worker.postMessage({ action: "AddBuffer", id, content: chunk.buffer }, [chunk.buffer]);
+        });
+      },
+      close: () => {
+        res();
+      }
+    }));
+  })
     await new Promise<void>(res => { // Wait that the Worker finalizes the hashes
       const id = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
       promises.set(id, res);
@@ -228,9 +276,24 @@ export default function App() {
   /**
    * Start the calculation of the checksum of the files.
    */
-  function handleNewFiles(files: File[] | FileList) {
+  async function handleNewFiles(files: File[] | FileList) {
     updateShowTables(true); // Show the Progress and Result tables
-    fileArr.current.push(...files);
+    for (const file of files) {
+      if (file.name.endsWith(".zip") && conversionSettings.current.readZip > 0) { // If "1", calculate the
+        const zip = await import("@zip.js/zip.js");
+        // Read the zip file
+        const reader = new zip.ZipReader<Blob>(new zip.BlobReader(file));
+        const entries = await reader.getEntries();
+        console.log(`Adding ${entries.length} files from zip ${file.name}`);
+        for (const entry of entries) entry.getData && !entry.directory && fileArr.current.push({ // Set the new entry in the file array
+          zipFile: reader,
+          data: entry,
+          _path: entry.filename,
+          size: entry.uncompressedSize
+        });
+        conversionSettings.current.readZip === 2 && fileArr.current.push(file); // Calculate the hash also of the zip file
+      } else fileArr.current.push(file);
+    }
     console.log(`Added ${files.length} files`)
     for (let i = 0; i < Math.min(conversionSettings.current.maxOperations, files.length); i++) getShaSum();
   }
@@ -278,6 +341,13 @@ export default function App() {
         </label><br></br>
         <label className="flex hcenter gap">
           <input type="checkbox" defaultChecked={conversionSettings.current.trackProgress} onChange={(e) => { conversionSettings.current.trackProgress = e.target.checked; saveSettings() }}></input>Track the checksum calculation progress
+        </label><br></br>
+        <label className="flex hcenter gap">
+          If a zip file is chosen, <select defaultValue={conversionSettings.current.readZip} onChange={(e) => {conversionSettings.current.readZip = +e.target.value; saveSettings();}}>
+            <option value={0}>calculate the hash of the zip file</option>
+            <option value={1}>calculate the hash of the files inside</option>
+            <option value={2}>calculate the hash of the files inside and of the zip file</option>
+          </select>
         </label>
       </div>
     </div><br></br><br></br>

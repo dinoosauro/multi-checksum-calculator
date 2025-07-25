@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/work-sans": "^5.2.6",
+    "@zip.js/zip.js": "^2.7.68",
     "crypto-js": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

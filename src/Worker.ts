@@ -23,7 +23,7 @@ onmessage = (msg) => {
         case "AddBuffer": { // Add a small ArrayBuffer to the hash
             const wordArray = CryptoJS.lib.WordArray.create(msg.data.content as ArrayBuffer);
             for (const { hash } of hashes) hash.update(wordArray);
-            postMessage({ id: msg.data.id });
+            postMessage({ id: msg.data.id, content: (msg.data.content as ArrayBuffer).byteLength, action: "UpdateProgress" });
             break;
         }
         case "GetString": { // Finalize the array

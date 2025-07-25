@@ -185,3 +185,6 @@ a {
 .wcenter {
   justify-content: center;
 }
+select {
+  width: 100%;
+}
