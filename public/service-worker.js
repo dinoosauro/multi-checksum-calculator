@@ -7,6 +7,7 @@ const filestoCache = [
     './icon.svg',
     './assets/index.css',
     './assets/index.js',
+    './assets/Worker-BAaLMeMy.js'
 ];
 self.addEventListener('install', e => {
     e.waitUntil(

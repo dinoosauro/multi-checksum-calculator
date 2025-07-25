@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import CryptoJS from "crypto-js";
 import OpenSourceDialog from "./OpenSourceDialog";
+import type { AlgoStorage, AlgoType } from "./Interfaces";
 
 export default function App() {
   /**
@@ -26,19 +27,6 @@ export default function App() {
    * This is saved in an independent array so that we can keep track of the number of concurrent operations.
    */
   let fileArr: File[] = [];
-  /**
-   * The possible algorithms for the checksum calculation, obviously only if 
-   */
-  type AlgoType =
-    | "SHA1"
-    | "SHA256"
-    | "SHA512"
-    | "SHA224"
-    | "SHA384"
-    | "SHA3"
-    | "MD5"
-    | "RIPEMD160";
-  type AlgoStorage = { [key in AlgoType]: boolean };
   /**
    * The content that should be displayed in the "Results tabs"
    */
@@ -142,58 +130,71 @@ export default function App() {
      */
     const currentTable = Array.from(tempSet);
     updateTableColumns(currentTable); // Maybe this was the first time the user has selected a certain algorithm, so we'll update the table header
+    const id = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+    const worker = new Worker(new URL("./Worker", import.meta.url), { type: "module" });
     /**
-     * The Object that contains the `item` AlgoType that is being used, and the `hash` object, that contains the necessary functions to update the hash.
-     */
-    const hashes = outputOptions.map((item) => {
-      const hash = CryptoJS.algo[item].create();
-      return { item, hash };
-    });
-    /**
-     * The information about the current progress
-     */
+* The information about the current progress
+*/
     let currentProgress: OutputProgress = {
       fileName: file.webkitRelativePath || file.name,
       max: file.size,
       id: CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex)
     }
     conversionSettings.current.trackProgress && updateProgress(prev => [...prev, currentProgress]);
-    for (let offset = 0; offset < file.size; offset += conversionSettings.current.chunkSize) { // Let's get this chunk of the Blob, and continue handling the hash.
+    const promises = new Map<string, () => void>([]);
+    worker.onmessage = (msg) => {
+      switch (msg.data.action) {
+        case "HashesReady": {
+          /**
+          * The checksums in the position they needed to be added in the "Result" table
+          */
+          const outputStrings: string[] = [];
+          for (const item of msg.data.content) { // msg.data.content is an object array. Each entry contains the `item` AlgoType (so, which algorithm has been used) and the `hash` string, with the output checksum.
+            outputStrings[currentTable.indexOf(item.item)] = item.hash;
+          }
+          updateResults(prev => [...prev, {
+            fileName: file.webkitRelativePath || file.name,
+            hashes: outputStrings,
+            id: CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex),
+          }]);
+          /**
+           * We need to update the progress bar so that it appears to be complete. Therefore, we'll wait that React renders the progress bar, and then we'll change its value.
+           */
+          function updateProgressBar() {
+            if (!currentProgress.progress) {
+              setTimeout(() => updateProgressBar(), 500);
+              return;
+            }
+            currentProgress.progress.value = currentProgress.progress.max;
+          };
+          conversionSettings.current.trackProgress && updateProgressBar();
+        }
+      }
+      // Resolve the promise with that ID
+      const promise = promises.get(msg.data.id);
+      promise && promise();
+    }
+    await new Promise<void>(res => { // Wait that the Worker creates the objects
+      const id = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+      promises.set(id, res);
+      worker.postMessage({ action: "Start", content: outputOptions, id });
+    });
+    for (let offset = 0; offset < file.size; offset += conversionSettings.current.chunkSize) { // Let's get this chunk of the Blob, and continue handling the hash.                 
       const chunk = file.slice(offset, offset + conversionSettings.current.chunkSize);
       const arrayBuffer = await chunk.arrayBuffer();
-      const wordArray = CryptoJS.lib.WordArray.create(arrayBuffer);
-      if (currentProgress.progress) currentProgress.progress.value += conversionSettings.current.chunkSize; // Maybe React still hasn't updated the DOM, so this might be undefined.
-      for (const { hash } of hashes) hash.update(wordArray);
+      if (currentProgress.progress) currentProgress.progress.value += conversionSettings.current.chunkSize; // Maybe React still hasn't updated the DOM, so this might be undefined.                 
+      await new Promise<void>(res => { // Wait that the worker adds this ArrayBuffer
+        const id = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+        promises.set(id, res);
+        worker.postMessage({ action: "AddBuffer", id, content: arrayBuffer }, [arrayBuffer]);
+      })
     }
-    /**
-     * An object array. Each entry contains the `item` AlgoType (so, which algorithm has been used) and the `hash` string, with the output checksum.
-     */
-    const outputHash = hashes.map((obj) => {
-      return { ...obj, hash: obj.hash.finalize().toString() };
+    await new Promise<void>(res => { // Wait that the Worker finalizes the hashes
+      const id = CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+      promises.set(id, res);
+      worker.postMessage({ action: "GetString", id })
     });
-    /**
-     * The checksums in the position they needed to be added in the "Result" table
-     */
-    const outputStrings: string[] = [];
-    for (const item of outputHash) {
-      outputStrings[currentTable.indexOf(item.item)] = item.hash;
-    }
-    updateResults(prev => [...prev, {
-      fileName: file.webkitRelativePath || file.name,
-      hashes: outputStrings,
-      id: CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex),
-    }]);
-    /**
-     * We need to update the progress bar so that it appears to be complete. Therefore, we'll wait that React renders the progress bar, and then we'll change its value.
-     */
-    function updateProgressBar() {
-      if (!currentProgress.progress) {
-        setTimeout(() => updateProgressBar(), 500);
-        return;
-      }
-      currentProgress.progress.value = currentProgress.progress.max;
-    };
-    conversionSettings.current.trackProgress && updateProgressBar();
+    worker.terminate();
     getShaSum(true);
   }
   /**
@@ -285,7 +286,7 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {results.map(file => <tr key={file.id}>
+              {results.map(file => <tr key={`Results-${file.id}`}>
                 <td>{file.fileName}</td>
                 {file.hashes.map(hash => <td>{hash}</td>)}
               </tr>
@@ -323,7 +324,7 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {progress.map((singleProgress, i) => <tr key={singleProgress.id}>
+            {progress.map((singleProgress, i) => <tr key={`Progress-${singleProgress.id}`}>
               <td>{singleProgress.fileName}</td>
               <td><progress ref={(item) => { progress[i].progress = item ?? undefined }} max={singleProgress.max}></progress></td>
             </tr>
